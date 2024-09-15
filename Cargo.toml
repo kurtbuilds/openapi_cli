@@ -1,0 +1,21 @@
+[package]
+name = "openapiv3_cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "openapi"
+path = "src/main.rs"
+
+[patch.crates-io]
+inquire = { git = "https://github.com/kurtbuilds/inquire" }
+[dependencies]
+clap = { version = "4.5.17", features = ["derive"] }
+openapiv3-extended = "6.0.0"
+inquire = { version = "0.7.5", features = ["editor"] }
+anyhow = "1.0.89"
+serde_json = "1.0.128"
+convert_case = "0.6.0"
+indexmap = "2.5.0"
+log = "0.4.22"
+serde_yaml = "0.9.34"

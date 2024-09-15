@@ -102,7 +102,7 @@ impl Insert {
 
         // let parameters = Text::new("What are the parameters?").prompt()?;
         // let request_body = Text::new("What is the request body?").prompt()?;
-        let response_body = Editor::new("What is the response body?").with_file_extension("json").prompt_immediate()?;
+        let response_body = Editor::new("What is the response body?").with_file_extension(".json").with_predefined_text(r#"{"$comment": "Replace this JSON with the response body"}"#).prompt_immediate()?;
         let response_body = serde_json::from_str(&response_body)?;
         let (schema, deps) = create_schema(&spec.components, &response_body)?;
         for (name, schema) in deps {

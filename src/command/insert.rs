@@ -113,7 +113,7 @@ impl Insert {
     }
 
     fn insert_url(&self, url: String, spec: &mut OpenAPI) -> Result<()> {
-        let url = munge_url(&url, &spec);
+        let mut url = munge_url(&url, &spec);
         let mut op = oa::Operation::default();
         let method = loop {
             let method = Text::new("What http method?").with_default("get").prompt()?;
@@ -159,13 +159,14 @@ impl Insert {
 
         // check url for spaces or for ? and then add query parameters.
         if url.contains(' ') {
-            for split in url.split(' ') {
+            for split in url.split(' ').skip(1) {
                 let split = split.split_once('=')
                     .map(|(k, _)| k)
                     .unwrap_or(split);
                 let param = query_param(split);
                 op.parameters.push(param);
             }
+            url = url.split(' ').next().unwrap().to_string();
         } else if url.contains('?') {
             let query = url.split_once('?').unwrap().1;
             for split in query.split('&') {
@@ -175,6 +176,7 @@ impl Insert {
                 let param = query_param(split);
                 op.parameters.push(param);
             }
+            url = url.split('?').next().unwrap().to_string();
         } else if matches!(method.as_str(), "get") {
             loop {
                 let param = Text::new("Enter a query param (blank to skip):").prompt()?;

@@ -3,7 +3,7 @@ use clap::Parser;
 use inquire::{Text, Editor};
 use anyhow::Result;
 use convert_case::{Case, Casing};
-use openapiv3::{OpenAPI, RefOr, Schema};
+use openapiv3::{OpenAPI, ParameterSchemaOrContent, RefOr, Schema};
 use openapiv3 as oa;
 use serde_json::Value;
 use indexmap::map::Entry;
@@ -77,8 +77,29 @@ fn create_schema(
     Ok((s, deps))
 }
 
+fn query_param(name: impl Into<String>) -> RefOr<oa::Parameter> {
+    RefOr::Item(oa::Parameter {
+        kind: oa::ParameterKind::Query {
+            style: oa::QueryStyle::Form,
+            allow_reserved: false,
+            allow_empty_value: None,
+        },
+        data: oa::ParameterData {
+            name: name.into(),
+            description: None,
+            required: false,
+            deprecated: None,
+            format: ParameterSchemaOrContent::Schema(RefOr::Item(Schema::new_string())),
+            example: None,
+            examples: Default::default(),
+            explode: None,
+            extensions: Default::default(),
+        },
+    })
+}
+
 impl Insert {
-    fn insert_dependent_schemas(&self, deps: Vec<(String, oa::Schema)>, spec: &mut OpenAPI) {
+    fn insert_dependent_schemas(&self, deps: Vec<(String, Schema)>, spec: &mut OpenAPI) {
         for (name, schema) in deps {
             match spec.components.schemas.entry(name.clone()) {
                 Entry::Occupied(_) => {
@@ -93,14 +114,14 @@ impl Insert {
 
     fn insert_url(&self, url: String, spec: &mut OpenAPI) -> Result<()> {
         let url = munge_url(&url, &spec);
-        let path = spec.paths.paths.entry(url).or_insert_with(Default::default).as_mut().unwrap();
-        let op = loop {
+        let mut op = oa::Operation::default();
+        let method = loop {
             let method = Text::new("What http method?").with_default("get").prompt()?;
             match method.as_str() {
-                "get" => break path.get.get_or_insert_with(Default::default),
-                "post" => break path.post.get_or_insert_with(Default::default),
-                "put" => break path.put.get_or_insert_with(Default::default),
-                "delete" => break path.delete.get_or_insert_with(Default::default),
+                "get" => break method,
+                "post" => break method,
+                "put" => break method,
+                "delete" => break method,
                 _ => {
                     println!("Invalid method");
                     continue;
@@ -112,13 +133,81 @@ impl Insert {
             op.operation_id = Some(operation_id);
         }
 
-        // let parameters = Text::new("What are the parameters?").prompt()?;
-        // let request_body = Text::new("What is the request body?").prompt()?;
+        let path_args: Vec<_> = url.match_indices('{').collect();
+        for (idx, _) in path_args {
+            let end_idx = url[idx..].find('}').unwrap() + idx;
+            let arg = &url[idx..=end_idx];
+            let param_name = &arg[1..arg.len() - 1];
+            let param = oa::Parameter {
+                kind: oa::ParameterKind::Path {
+                    style: oa::PathStyle::Simple,
+                },
+                data: oa::ParameterData {
+                    name: param_name.to_string(),
+                    description: None,
+                    required: true,
+                    deprecated: None,
+                    format: ParameterSchemaOrContent::Schema(RefOr::Item(Schema::new_string())),
+                    example: None,
+                    examples: Default::default(),
+                    explode: None,
+                    extensions: Default::default(),
+                },
+            };
+            op.parameters.push(RefOr::Item(param));
+        }
+
+        // check url for spaces or for ? and then add query parameters.
+        if url.contains(' ') {
+            for split in url.split(' ') {
+                let split = split.split_once('=')
+                    .map(|(k, _)| k)
+                    .unwrap_or(split);
+                let param = query_param(split);
+                op.parameters.push(param);
+            }
+        } else if url.contains('?') {
+            let query = url.split_once('?').unwrap().1;
+            for split in query.split('&') {
+                let split = split.split_once('=')
+                    .map(|(k, _)| k)
+                    .unwrap_or(split);
+                let param = query_param(split);
+                op.parameters.push(param);
+            }
+        } else if matches!(method.as_str(), "get") {
+            loop {
+                let param = Text::new("Enter a query param (blank to skip):").prompt()?;
+                if param.is_empty() {
+                    break;
+                }
+                let param = query_param(param);
+                op.parameters.push(param);
+            }
+        }
+
+        if matches!(method.as_str(), "put" | "post") {
+            let request_body = Editor::new("What is the request body?").with_file_extension(".json").with_predefined_text(r#"{"$comment": "Replace this JSON with the request body"}"#).prompt_immediate()?;
+            let request_body = serde_json::from_str(&request_body)?;
+            let (schema, deps) = create_schema(&spec.components, &request_body)?;
+            op.add_request_body_json(Some(RefOr::Item(schema)));
+            self.insert_dependent_schemas(deps, spec);
+        }
+
         let response_body = Editor::new("What is the response body?").with_file_extension(".json").with_predefined_text(r#"{"$comment": "Replace this JSON with the response body"}"#).prompt_immediate()?;
         let response_body = serde_json::from_str(&response_body)?;
         let (schema, deps) = create_schema(&spec.components, &response_body)?;
         op.add_response_success_json(Some(RefOr::Item(schema)));
         self.insert_dependent_schemas(deps, spec);
+
+        let path = spec.paths.paths.entry(url.clone()).or_insert_with(Default::default).as_mut().unwrap();
+        match method.as_str() {
+            "get" => path.get = Some(op),
+            "post" => path.post = Some(op),
+            "put" => path.put = Some(op),
+            "delete" => path.delete = Some(op),
+            _ => panic!("Invalid method"),
+        }
         Ok(())
     }
 

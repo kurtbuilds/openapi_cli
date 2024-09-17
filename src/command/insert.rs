@@ -78,7 +78,6 @@ fn create_schema(
 }
 
 impl Insert {
-
     fn insert_dependent_schemas(&self, deps: Vec<(String, oa::Schema)>, spec: &mut OpenAPI) {
         for (name, schema) in deps {
             match spec.components.schemas.entry(name.clone()) {
@@ -93,6 +92,7 @@ impl Insert {
     }
 
     fn insert_url(&self, url: String, spec: &mut OpenAPI) -> Result<()> {
+        let url = munge_url(&url, &spec);
         let path = spec.paths.paths.entry(url).or_insert_with(Default::default).as_mut().unwrap();
         let op = loop {
             let method = Text::new("What http method?").with_default("get").prompt()?;
@@ -134,12 +134,53 @@ impl Insert {
     pub fn run(&self) -> Result<()> {
         let mut spec: OpenAPI = serde_yaml::from_reader(fs::File::open(&self.target)?)?;
         let text = Text::new("What do you want to insert? start with slash for a URL.").prompt()?;
-        if text.starts_with('/') {
+        if text.starts_with(['/', ':']) {
             self.insert_url(text, &mut spec)?;
         } else {
             self.insert_schema(text, &mut spec)?;
         }
         serde_yaml::to_writer(fs::File::create(&self.target)?, &spec)?;
         Ok(())
+    }
+}
+
+fn munge_url(url: &str, spec: &OpenAPI) -> String {
+    let mut url = url.to_string();
+    if url.starts_with(":") {
+        // only take the part of url including the first /
+        let idx = url.find('/').unwrap();
+        url = url.split_at(idx).1.to_string();
+    }
+    for server in &spec.servers {
+        // get the path part of a url that looks like  http://localhost:5000/v1/api
+        // 8 is the hacky way to skip the http(s)?:// part
+        let Some(idx) = server.url[8..].find('/') else {
+            continue;
+        };
+        let path = &server.url[8 + idx..];
+        if url.starts_with(path) {
+            url = url.trim_start_matches(path).to_string();
+            break;
+        }
+    }
+    url
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std_ext::default;
+    #[test]
+    fn test_munge_url() {
+        let spec = OpenAPI {
+            servers: vec![oa::Server {
+                url: "http://localhost:5000/v1/api".to_string(),
+                ..default()
+            }],
+            ..default()
+        };
+        assert_eq!(munge_url("/v1/api/iserver/account/{}/summary", &spec), "/iserver/account/{}/summary");
+        assert_eq!(munge_url(":5000/v1/api/iserver/account/{}/summary", &spec), "/iserver/account/{}/summary");
+        assert_eq!(munge_url("/iserver/account/{}/summary", &spec), "/iserver/account/{}/summary");
     }
 }

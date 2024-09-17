@@ -289,6 +289,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
+name = "kurtbuilds_std_ext"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24e44fe2f0f9815ce535f9adfa711e335ad98220ec8850e514616bcdad4f44b1"
+
+[[package]]
 name = "libc"
 version = "0.2.158"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -371,6 +377,7 @@ dependencies = [
  "convert_case",
  "indexmap",
  "inquire",
+ "kurtbuilds_std_ext",
  "log",
  "openapiv3-extended",
  "serde_json",

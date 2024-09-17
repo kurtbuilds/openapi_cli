@@ -38,27 +38,25 @@ fn create_schema(
             s
         }
         Value::String(_) => {
-            let s = oa::Schema::new_string();
+            let s = Schema::new_string();
             s
         }
         Value::Array(inner) => {
-            let inner = if inner.len() == 0 {
-                oa::Schema::new_any()
-            } else {
-                let (schema, dep_deps) = create_schema(components, &inner[0])?;
-                deps.extend(dep_deps);
-                schema
+            if inner.len() == 0 {
+                return Ok((Schema::new_array_any(), deps));
             };
+            let (inner, dep_deps) = create_schema(components, &inner[0])?;
+            deps.extend(dep_deps);
             if is_primitive(&inner) {
-                oa::Schema::new_array(inner)
+                Schema::new_array(inner)
             } else {
                 let object_name = "Inner".to_string();
                 deps.push((object_name.clone(), inner));
-                oa::Schema::new_array(RefOr::schema_ref(&object_name))
+                Schema::new_array(RefOr::schema_ref(&object_name))
             }
         }
         Value::Object(map) => {
-            let mut s = oa::Schema::new_object();
+            let mut s = Schema::new_object();
             for (key, value) in map {
                 let name = key.to_case(Case::Pascal);
                 let (schema, dep_deps) = create_schema(components, value)?;

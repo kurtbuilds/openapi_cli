@@ -24,16 +24,17 @@ fn is_primitive(schema: &oa::Schema) -> bool {
 fn create_schema(
     components: &oa::Components,
     value: &Value,
-) -> Result<(oa::Schema, Vec<(String, oa::Schema)>)> {
+    name: Option<String>,
+) -> Result<(Schema, Vec<(String, Schema)>)> {
     let mut deps = Vec::new();
     let s = match value {
         Value::Null => oa::Schema::new_object(),
         Value::Bool(_) => oa::Schema::new_bool(),
         Value::Number(n) => {
             let s = if n.is_f64() {
-                oa::Schema::new_number()
+                Schema::new_number()
             } else {
-                oa::Schema::new_integer()
+                Schema::new_integer()
             };
             s
         }
@@ -45,21 +46,21 @@ fn create_schema(
             if inner.len() == 0 {
                 return Ok((Schema::new_array_any(), deps));
             };
-            let (inner, dep_deps) = create_schema(components, &inner[0])?;
+            let inner_schema = name.map(|s| format!("{}Item", s)).unwrap_or_else(|| "Inner".to_string());
+            let (inner, dep_deps) = create_schema(components, &inner[0], Some(inner_schema.clone()))?;
             deps.extend(dep_deps);
             if is_primitive(&inner) {
                 Schema::new_array(inner)
             } else {
-                let object_name = "Inner".to_string();
-                deps.push((object_name.clone(), inner));
-                Schema::new_array(RefOr::schema_ref(&object_name))
+                deps.push((inner_schema.clone(), inner));
+                Schema::new_array(RefOr::schema_ref(&inner_schema))
             }
         }
         Value::Object(map) => {
             let mut s = Schema::new_object();
             for (key, value) in map {
                 let name = key.to_case(Case::Pascal);
-                let (schema, dep_deps) = create_schema(components, value)?;
+                let (schema, dep_deps) = create_schema(components, value, Some(name.clone()))?;
                 if !is_primitive(&schema) {
                     deps.push((name.clone(), schema.clone()));
                     deps.extend(dep_deps);
@@ -191,14 +192,14 @@ impl Insert {
         if matches!(method.as_str(), "put" | "post") {
             let request_body = Editor::new("What is the request body?").with_file_extension(".json").with_predefined_text(r#"{"$comment": "Replace this JSON with the request body"}"#).prompt_immediate()?;
             let request_body = serde_json::from_str(&request_body)?;
-            let (schema, deps) = create_schema(&spec.components, &request_body)?;
+            let (schema, deps) = create_schema(&spec.components, &request_body, None)?;
             op.add_request_body_json(Some(RefOr::Item(schema)));
             self.insert_dependent_schemas(deps, spec);
         }
 
         let response_body = Editor::new("What is the response body?").with_file_extension(".json").with_predefined_text(r#"{"$comment": "Replace this JSON with the response body"}"#).prompt_immediate()?;
         let response_body = serde_json::from_str(&response_body)?;
-        let (schema, deps) = create_schema(&spec.components, &response_body)?;
+        let (schema, deps) = create_schema(&spec.components, &response_body, None)?;
         op.add_response_success_json(Some(RefOr::Item(schema)));
         self.insert_dependent_schemas(deps, spec);
 
@@ -216,7 +217,7 @@ impl Insert {
     fn insert_schema(&self, name: String, spec: &mut OpenAPI) -> Result<()> {
         let body = Editor::new("What is the schema body?").with_file_extension(".json").with_predefined_text(r#"{"$comment": "Replace this JSON with the schema body."}"#).prompt_immediate()?;
         let body = serde_json::from_str(&body)?;
-        let (schema, deps) = create_schema(&spec.components, &body)?;
+        let (schema, deps) = create_schema(&spec.components, &body, None)?;
         self.insert_dependent_schemas(deps, spec);
         spec.schemas.insert(name, schema);
         Ok(())
